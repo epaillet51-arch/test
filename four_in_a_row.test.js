@@ -65,3 +65,10 @@ test("computer always returns a legal move", () => {
   }
   assert.equal(g.computerMove(board, 4), g.COLS - 1);
 });
+
+test("winningLine returns the four winning cells", () => {
+  const board = g.createBoard();
+  for (let c = 2; c < 6; c++) g.dropPiece(board, c, g.HUMAN);
+  assert.deepEqual(g.winningLine(board, g.HUMAN), [[5, 2], [5, 3], [5, 4], [5, 5]]);
+  assert.equal(g.winningLine(board, g.COMPUTER), null);
+});

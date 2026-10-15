@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Four in a Row</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  /* Layout: the board is the hero; a narrow control rail sits beside it on wide screens and below it on phones. */
+  :root {
+    --ground: #e7ece9;      /* mineral paper, a touch of green */
+    --panel: #f5f7f5;
+    --ink: #13252a;
+    --muted: #586b6e;
+    --line: #c7d2ce;
+    --board: #1d5260;       /* petrol enamel */
+    --board-edge: #143e49;
+    --hole: #d9e2de;
+    --you: #e4572e;         /* persimmon */
+    --cpu: #efb32b;         /* saffron */
+    --focus: #1d5260;
+
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Figtree", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --step--1: 0.8125rem;
+    --step-0: 0.9375rem;
+    --step-1: 1.125rem;
+    --step-2: 1.625rem;
+    --step-3: 2.25rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d171a; --panel: #132226; --ink: #e1ebe7; --muted: #8ea1a2; --line: #23363b;
+      --board: #22606f; --board-edge: #184955; --hole: #0a1316;
+      --you: #f06a3f; --cpu: #f4c247; --focus: #7cc3d1;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d171a; --panel: #132226; --ink: #e1ebe7; --muted: #8ea1a2; --line: #23363b;
+    --board: #22606f; --board-edge: #184955; --hole: #0a1316;
+    --you: #f06a3f; --cpu: #f4c247; --focus: #7cc3d1;
+    color-scheme: dark;
+  }
+
+  html, body { min-height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 var(--step-0)/1.5 var(--font-body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 24px 40px;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+  .page {
+    max-width: 1000px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-areas: "head head" "board rail";
+    gap: 20px 40px;
+    align-items: start;
+  }
+  @media (max-width: 760px) {
+    .page { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "board" "rail"; }
+  }
+
+  /* Header: wordmark and live status */
+  header {
+    grid-area: head;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px 24px;
+  }
+  .wordmark {
+    margin: 0;
+    font: 800 var(--step-3)/1 var(--font-display);
+    letter-spacing: -0.03em;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .wordmark .four { display: inline-flex; gap: 4px; }
+  .wordmark .four i {
+    width: 0.42em; height: 0.42em; border-radius: 50%;
+    background: var(--you);
+    box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+  }
+  .status { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .status .token { width: 28px; height: 28px; flex: none; }
+  .status-text { min-width: 0; }
+  .status-main { font: 800 var(--step-2)/1.1 var(--font-display); letter-spacing: -0.02em; }
+  .status-sub { color: var(--muted); font-size: var(--step--1); }
+  .thinking .token { animation: bob 0.9s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(-5px); } }
+
+  /* Board */
+  .board-wrap { grid-area: board; min-width: 0; }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0;
+    padding: 2.2%;
+    background: var(--board);
+    border-radius: 18px;
+    box-shadow: inset 0 -6px 0 var(--board-edge), 0 18px 30px -18px rgba(8, 30, 36, 0.55);
+    max-width: 640px;
+    overflow: clip; /* dropping discs appear from the top edge */
+    touch-action: manipulation;
+  }
+  .col {
+    display: grid;
+    grid-template-rows: repeat(6, auto);
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .col:focus-visible { outline-offset: -2px; outline-color: var(--cpu); }
+  .board.locked .col, .col[aria-disabled="true"] { cursor: default; }
+  .board:not(.locked) .col:not([aria-disabled="true"]):hover { background: rgba(255, 255, 255, 0.07); }
+
+  .cell { aspect-ratio: 1; display: grid; place-items: center; }
+  .cell::before, .cell::after, .disc { grid-area: 1 / 1; width: 80%; aspect-ratio: 1; border-radius: 50%; }
+  .cell::before {
+    content: "";
+    background: var(--hole);
+    box-shadow: inset 0 4px 0 rgba(0, 0, 0, 0.22);
+  }
+  /* Ghost disc showing where a click will land */
+  .board:not(.locked) .col:not([aria-disabled="true"]):is(:hover, :focus-visible) .cell.next::after {
+    content: "";
+    background: var(--you);
+    opacity: 0.38;
+  }
+
+  .disc, .token {
+    display: block;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 5px rgba(0, 0, 0, 0.1), inset 0 -4px 0 rgba(0, 0, 0, 0.16);
+  }
+  .disc { position: relative; z-index: 1; }
+  .is-you { background: var(--you); }
+  .is-cpu { background: var(--cpu); }
+  .disc.drop { animation: fall calc(200ms + var(--fall) * 55ms) cubic-bezier(0.45, 0, 0.9, 0.6) both; }
+  @keyframes fall {
+    0% { transform: translateY(calc(var(--fall) * -125%)); }
+    78% { transform: translateY(0); }
+    89% { transform: translateY(-9%); }
+    100% { transform: translateY(0); }
+  }
+  .disc.last::after {
+    content: "";
+    position: absolute;
+    inset: 38%;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.55);
+  }
+  .disc.win { animation: glow 1.1s ease-in-out infinite alternate; }
+  @keyframes glow {
+    from { box-shadow: inset 0 0 0 5px rgba(0, 0, 0, 0.1), 0 0 0 0 var(--panel); }
+    to   { box-shadow: inset 0 0 0 5px rgba(0, 0, 0, 0.1), 0 0 0 5px var(--panel); }
+  }
+
+  .col-labels {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    max-width: 640px;
+    padding-inline: 2.2%;
+    box-sizing: border-box;
+    margin-top: 8px;
+    color: var(--muted);
+    font: 500 var(--step--1)/1 var(--font-mono);
+    text-align: center;
+  }
+  .hint { color: var(--muted); font-size: var(--step--1); margin: 10px 0 0; max-width: 640px; }
+  kbd {
+    font: 500 0.75rem/1 var(--font-mono);
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 2px 5px;
+    background: var(--panel);
+  }
+
+  /* Control rail */
+  .rail { grid-area: rail; display: grid; gap: 22px; min-width: 0; }
+  .group { display: grid; gap: 8px; }
+  .label {
+    font: 600 0.6875rem/1 var(--font-body);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .seg {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 3px;
+    background: var(--panel);
+  }
+  .seg button {
+    border: 0;
+    border-radius: 7px;
+    padding: 7px 6px;
+    background: transparent;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+  .seg-note { color: var(--muted); font-size: var(--step--1); }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    flex: 1 1 auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    background: var(--panel);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--ground); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .score {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .score div { padding: 10px 0; display: grid; gap: 2px; }
+  .score div + div { border-left: 1px solid var(--line); padding-left: 12px; }
+  .score b { font: 800 var(--step-2)/1 var(--font-display); font-variant-numeric: tabular-nums; }
+  .score span { color: var(--muted); font-size: var(--step--1); display: flex; align-items: center; gap: 6px; }
+  .score .token { width: 10px; height: 10px; box-shadow: none; }
+
+  .record {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    min-height: 26px;
+  }
+  .record li {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font: 500 0.75rem/1 var(--font-mono);
+    color: #2a1405;
+  }
+  .record .empty { width: auto; color: var(--muted); font: inherit; font-size: var(--step--1); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .disc.drop, .disc.win, .thinking .token { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <h1 class="wordmark"><span class="four" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Four in a Row</h1>
+    <div class="status" id="status" role="status" aria-live="polite">
+      <span class="token is-you" id="status-token"></span>
+      <div class="status-text">
+        <div class="status-main" id="status-main">Your move</div>
+        <div class="status-sub" id="status-sub">Drop a disc in any column.</div>
+      </div>
+    </div>
+  </header>
+
+  <section class="board-wrap" aria-label="Game board">
+    <div class="board" id="board"></div>
+    <div class="col-labels" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span></div>
+    <p class="hint">Click a column to drop your disc. On a keyboard, press <kbd>1</kbd>–<kbd>7</kbd>, or use <kbd>←</kbd> <kbd>→</kbd> and <kbd>Enter</kbd>.</p>
+  </section>
+
+  <aside class="rail" aria-label="Game controls">
+    <div class="group">
+      <span class="label" id="difficulty-label">Computer strength</span>
+      <div class="seg" role="group" aria-labelledby="difficulty-label" id="difficulty">
+        <button type="button" id="difficulty-easy" data-value="easy">Easy</button>
+        <button type="button" id="difficulty-medium" data-value="medium">Medium</button>
+        <button type="button" id="difficulty-hard" data-value="hard">Hard</button>
+      </div>
+      <span class="seg-note" id="difficulty-note">Looks 4 moves ahead.</span>
+    </div>
+
+    <div class="group">
+      <span class="label" id="first-label">First move next game</span>
+      <div class="seg" role="group" aria-labelledby="first-label" id="first">
+        <button type="button" id="first-you" data-value="you">You</button>
+        <button type="button" id="first-cpu" data-value="cpu">Computer</button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn primary" id="new-game">New game</button>
+      <button type="button" class="btn" id="take-back">Take back</button>
+    </div>
+
+    <div class="group">
+      <span class="label">Score in this browser</span>
+      <div class="score">
+        <div><b id="score-you">0</b><span><i class="token is-you"></i>You</span></div>
+        <div><b id="score-cpu">0</b><span><i class="token is-cpu"></i>Computer</span></div>
+        <div><b id="score-draw">0</b><span>Draws</span></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="label">Move record</span>
+      <ol class="record" id="record" aria-label="Columns played, in order"></ol>
+      <span class="seg-note">Each move is written as its column number, the usual way Connect Four games are recorded.</span>
+    </div>
+  </aside>
+</main>
+
+<script src="four_in_a_row_engine.js"></script>
+<script>
+"use strict";
+(function () {
+  const E = window.FourInARow;
+  const { ROWS, COLS, EMPTY, HUMAN, COMPUTER, DIFFICULTY_DEPTH } = E;
+  const STORE_KEY = "four-in-a-row:v1";
+  const COMPUTER_DELAY_MS = 450;
+
+  const $ = (id) => document.getElementById(id);
+  const boardEl = $("board");
+
+  // ---- state ----
+  let board = E.createBoard();
+  let moves = [];              // [{ col, row, piece }]
+  let humanFirst = true;       // who started the current game
+  let nextFirst = "you";       // setting for the next game
+  let difficulty = "medium";
+  let winLine = null;
+  let winner = null;           // HUMAN, COMPUTER, EMPTY (draw) or null while playing
+  let thinking = false;
+  let timer = null;
+  let score = { you: 0, cpu: 0, draw: 0 };
+  let focusCol = 3;
+
+  function load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
+      if (saved.score) score = { ...score, ...saved.score };
+      if (saved.difficulty in DIFFICULTY_DEPTH) difficulty = saved.difficulty;
+      if (saved.nextFirst === "you" || saved.nextFirst === "cpu") nextFirst = saved.nextFirst;
+    } catch (e) { /* storage unavailable: play without remembering */ }
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ score, difficulty, nextFirst })); }
+    catch (e) { /* ignore */ }
+  }
+
+  // ---- board DOM, built once ----
+  const columns = [];
+  const cells = [];   // cells[row][col]
+  for (let r = 0; r < ROWS; r++) cells.push([]);
+  for (let c = 0; c < COLS; c++) {
+    const col = document.createElement("button");
+    col.type = "button";
+    col.className = "col";
+    col.id = "col-" + (c + 1);
+    col.dataset.col = c;
+    col.tabIndex = c === focusCol ? 0 : -1;
+    for (let r = 0; r < ROWS; r++) {
+      const cell = document.createElement("span");
+      cell.className = "cell";
+      col.appendChild(cell);
+      cells[r][c] = cell;
+    }
+    columns.push(col);
+    boardEl.appendChild(col);
+  }
+
+  const turn = () => ((moves.length % 2 === 0) === humanFirst ? HUMAN : COMPUTER);
+  const humanMoves = () => moves.filter((m) => m.piece === HUMAN).length;
+
+  function describeLine(line) {
+    const [[r0, c0], [r1, c1]] = line;
+    if (r0 === r1) return "across";
+    if (c0 === c1) return "down a column";
+    return "on the diagonal";
+  }
+
+  // ---- rendering ----
+  function render(animateLast) {
+    const last = moves[moves.length - 1];
+    const winSet = new Set((winLine || []).map(([r, c]) => r + "," + c));
+    const locked = winner !== null || thinking || turn() !== HUMAN;
+    boardEl.classList.toggle("locked", locked);
+
+    for (let c = 0; c < COLS; c++) {
+      let nextRow = -1;
+      for (let r = 0; r < ROWS; r++) {
+        const cell = cells[r][c];
+        const piece = board[r][c];
+        if (piece === EMPTY) nextRow = r;
+        let disc = cell.firstElementChild;
+        if (piece === EMPTY) {
+          if (disc) disc.remove();
+        } else {
+          if (!disc) {
+            disc = document.createElement("span");
+            cell.appendChild(disc);
+            if (animateLast && last && last.row === r && last.col === c) {
+              disc.style.setProperty("--fall", r + 1);
+              disc.classList.add("drop");
+            }
+          }
+          disc.className = "disc " + (piece === HUMAN ? "is-you" : "is-cpu") +
+            (disc.classList.contains("drop") ? " drop" : "") +
+            (last && last.row === r && last.col === c && !winLine ? " last" : "") +
+            (winSet.has(r + "," + c) ? " win" : "");
+        }
+        cell.classList.remove("next");
+      }
+      if (nextRow >= 0) cells[nextRow][c].classList.add("next");
+      const free = nextRow + 1;
+      const col = columns[c];
+      col.setAttribute("aria-disabled", String(locked || free === 0));
+      col.setAttribute("aria-label",
+        `Column ${c + 1}, ` + (free === 0 ? "full" : `${free} ${free === 1 ? "space" : "spaces"} free`));
+    }
+
+    // status
+    const status = $("status");
+    const token = $("status-token");
+    let main, sub, tokenClass = "is-you";
+    status.classList.toggle("thinking", thinking);
+    if (winner === HUMAN) {
+      main = "You win!";
+      sub = `Four ${describeLine(winLine)} in ${moves.length} moves.`;
+    } else if (winner === COMPUTER) {
+      main = "Computer wins";
+      sub = `Four ${describeLine(winLine)} in ${moves.length} moves. Try again?`;
+      tokenClass = "is-cpu";
+    } else if (winner === EMPTY) {
+      main = "Draw";
+      sub = "All 42 spaces are filled and nobody got four.";
+    } else if (turn() === COMPUTER) {
+      main = "Computer is thinking…";
+      sub = `Looking ${DIFFICULTY_DEPTH[difficulty]} moves ahead.`;
+      tokenClass = "is-cpu";
+    } else {
+      main = "Your move";
+      sub = last ? `Computer played column ${last.col + 1}.` : "Drop a disc in any column.";
+    }
+    token.className = "token " + tokenClass;
+    $("status-main").textContent = main;
+    $("status-sub").textContent = sub;
+
+    // controls
+    for (const btn of $("difficulty").children) btn.setAttribute("aria-pressed", String(btn.dataset.value === difficulty));
+    for (const btn of $("first").children) btn.setAttribute("aria-pressed", String(btn.dataset.value === nextFirst));
+    $("difficulty-note").textContent = `Looks ${DIFFICULTY_DEPTH[difficulty]} moves ahead` +
+      (difficulty === "easy" ? " and sometimes plays at random." : ".");
+    $("take-back").disabled = winner !== null || humanMoves() === 0;
+
+    $("score-you").textContent = score.you;
+    $("score-cpu").textContent = score.cpu;
+    $("score-draw").textContent = score.draw;
+
+    const record = $("record");
+    record.replaceChildren();
+    if (moves.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No moves yet.";
+      record.appendChild(li);
+    }
+    moves.forEach((m, i) => {
+      const li = document.createElement("li");
+      li.className = m.piece === HUMAN ? "is-you" : "is-cpu";
+      li.textContent = m.col + 1;
+      li.title = `Move ${i + 1}: ${m.piece === HUMAN ? "you" : "computer"}, column ${m.col + 1}`;
+      record.appendChild(li);
+    });
+  }
+
+  // ---- game flow ----
+  function place(col) {
+    const piece = turn();
+    const row = E.dropPiece(board, col, piece);
+    moves.push({ col, row, piece });
+    winLine = E.winningLine(board, piece);
+    if (winLine) {
+      winner = piece;
+      score[piece === HUMAN ? "you" : "cpu"]++;
+      save();
+    } else if (E.isFull(board)) {
+      winner = EMPTY;
+      score.draw++;
+      save();
+    }
+    render(true);
+    if (winner === null && turn() === COMPUTER) scheduleComputer();
+  }
+
+  function scheduleComputer() {
+    thinking = true;
+    render(false);
+    timer = setTimeout(() => {
+      timer = null;
+      const col = E.computerMove(board, DIFFICULTY_DEPTH[difficulty]);
+      thinking = false;
+      place(col);
+    }, COMPUTER_DELAY_MS);
+  }
+
+  function cancelComputer() {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    thinking = false;
+  }
+
+  function humanPlay(col) {
+    if (winner !== null || thinking || turn() !== HUMAN || !E.isValidMove(board, col)) return;
+    place(col);
+  }
+
+  function rebuild(cols) {
+    board = E.createBoard();
+    moves = [];
+    winLine = null;
+    winner = null;
+    for (const col of cols) {
+      const piece = turn();
+      const row = E.dropPiece(board, col, piece);
+      moves.push({ col, row, piece });
+    }
+  }
+
+  function newGame() {
+    cancelComputer();
+    humanFirst = nextFirst === "you";
+    rebuild([]);
+    render(false);
+    if (turn() === COMPUTER) scheduleComputer();
+  }
+
+  function takeBack() {
+    if (winner !== null || humanMoves() === 0) return;
+    cancelComputer();
+    const cols = moves.map((m) => m.col);
+    // Remove moves until your last move is gone, so it is your turn again.
+    while (cols.length) {
+      const removed = moves[cols.length - 1];
+      cols.pop();
+      if (removed.piece === HUMAN) break;
+    }
+    rebuild(cols);
+    render(false);
+  }
+
+  function setFocus(c) {
+    focusCol = (c + COLS) % COLS;
+    columns.forEach((col, i) => { col.tabIndex = i === focusCol ? 0 : -1; });
+    columns[focusCol].focus();
+  }
+
+  // ---- events ----
+  boardEl.addEventListener("click", (e) => {
+    const col = e.target.closest(".col");
+    if (col) humanPlay(Number(col.dataset.col));
+  });
+  boardEl.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { e.preventDefault(); setFocus(focusCol + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); setFocus(focusCol - 1); }
+  });
+  boardEl.addEventListener("focusin", (e) => {
+    const col = e.target.closest(".col");
+    if (col) focusCol = Number(col.dataset.col);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const n = Number(e.key);
+    if (Number.isInteger(n) && n >= 1 && n <= COLS) humanPlay(n - 1);
+  });
+
+  $("difficulty").addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    difficulty = btn.dataset.value;
+    save();
+    render(false);
+  });
+  $("first").addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    nextFirst = btn.dataset.value;
+    save();
+    // Before you have moved, switching applies straight away.
+    if (winner === null && humanMoves() === 0) newGame();
+    else render(false);
+  });
+  $("new-game").addEventListener("click", newGame);
+  $("take-back").addEventListener("click", takeBack);
+
+  // ---- start (keeps a game in progress across page updates in the viewer) ----
+  function start(data) {
+    load();
+    if (data && Array.isArray(data.cols)) {
+      humanFirst = data.humanFirst !== false;
+      try { rebuild(data.cols); } catch (e) { rebuild([]); }
+      winLine = E.winningLine(board, HUMAN) || E.winningLine(board, COMPUTER);
+      if (winLine) winner = board[winLine[0][0]][winLine[0][1]];
+      else if (E.isFull(board)) winner = EMPTY;
+      render(false);
+      if (winner === null && turn() === COMPUTER) scheduleComputer();
+    } else {
+      newGame();
+    }
+  }
+  window.claude?.hot?.snapshot?.(() => ({ cols: moves.map((m) => m.col), humanFirst }));
+  if (window.claude?.hot?.ready) window.claude.hot.ready(start);
+  else start(window.claude?.hot?.data ?? {});
+})();
+</script>
+</body>
+</html>
